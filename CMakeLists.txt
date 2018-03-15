@@ -14,18 +14,6 @@ string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE)
 #force a single configuration type on Windows builds
 set(CMAKE_CONFIGURATION_TYPES "${CMAKE_BUILD_TYPE}" CACHE STRING "" FORCE)
 
-include(CMakePackageConfigHelpers)
-
-write_basic_package_version_file(
-  "${CMAKE_CURRENT_BINARY_DIR}/GPerfToolsonfigVersion.cmake"
-  VERSION ${PROJECT_VERSION}
-  COMPATIBILITY AnyNewerVersion
-)
-
-export(EXPORT GPerfToolsConfig FILE GPerfToolsConfig.cmake)
-
-install(EXPORT GPerfToolsConfig DESTINATION lib/cmake/GPerfTools)
-
 install(
   FILES
     "${CMAKE_CURRENT_BINARY_DIR}/GPerfToolsConfigVersion.cmake"
@@ -149,3 +137,14 @@ add_library(libtcmalloc_minimal SHARED ${TCMallocMinimalHeaders} ${TCMallocMinim
 install (FILES ${TCMallocMinimalGperfHeaders} DESTINATION include/gperftools)
 install (TARGETS libtcmalloc_minimal DESTINATION lib EXPORT GPerfToolsConfig)
 
+include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/GPerfToolsConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY AnyNewerVersion
+)
+
+export(EXPORT GPerfToolsConfig FILE GPerfToolsConfig.cmake)
+
+install(EXPORT GPerfToolsConfig DESTINATION lib/cmake/GPerfTools)
