@@ -133,7 +133,7 @@ endif(WIN32)
 
 add_library(libtcmalloc_minimal SHARED ${TCMallocMinimalHeaders} ${TCMallocMinimalGperfHeaders} ${TCMallocMinimalSources})
 add_library(libtcmalloc_minimal_static STATIC ${TCMallocMinimalHeaders} ${TCMallocMinimalGperfHeaders} ${TCMallocMinimalSources})
-set_target_properties(libtcmalloc_minimal_static PROPERTIES COMPILE_FLAGS "/D PERFTOOLS_DLL_DECL=")
+#set_target_properties(libtcmalloc_minimal_static PROPERTIES COMPILE_FLAGS "/D PERFTOOLS_DLL_DECL=")
 #target_compile_definitions(libtcmalloc_minimal PRIVATE "LIBTCMALLOC_MINIMAL_EXPORTS")
 
 install (FILES ${TCMallocMinimalGperfHeaders} DESTINATION include/gperftools)
