@@ -143,6 +143,7 @@
 #undef small
 
 using STL_NAMESPACE::max;
+using STL_NAMESPACE::min;
 using STL_NAMESPACE::numeric_limits;
 using STL_NAMESPACE::vector;
 
@@ -496,9 +497,9 @@ static void DumpStats(TCMalloc_Printer* out, int level) {
     out->printf("------------------------------------------------\n");
     uint64_t total_normal = 0;
     uint64_t total_returned = 0;
-    for (int s = 0; s < kMaxPages; s++) {
-      const int n_length = small.normal_length[s];
-      const int r_length = small.returned_length[s];
+    for (int s = 1; s <= kMaxPages; s++) {
+      const int n_length = small.normal_length[s - 1];
+      const int r_length = small.returned_length[s - 1];
       if (n_length + r_length > 0) {
         uint64_t n_pages = s * n_length;
         uint64_t r_pages = s * r_length;
@@ -517,8 +518,9 @@ static void DumpStats(TCMalloc_Printer* out, int level) {
 
     total_normal += large.normal_pages;
     total_returned += large.returned_pages;
-    out->printf(">255   large * %6u spans ~ %6.1f MiB; %6.1f MiB cum"
+    out->printf(">%-5u large * %6u spans ~ %6.1f MiB; %6.1f MiB cum"
                 "; unmapped: %6.1f MiB; %6.1f MiB cum\n",
+                static_cast<unsigned int>(kMaxPages),
                 static_cast<unsigned int>(large.spans),
                 PagesToMiB(large.normal_pages + large.returned_pages),
                 PagesToMiB(total_normal + total_returned),
@@ -990,17 +992,17 @@ class TCMallocImplementation : public MallocExtension {
     v->push_back(span_info);
 
     // small spans
-    for (int s = 1; s < kMaxPages; s++) {
+    for (int s = 1; s <= kMaxPages; s++) {
       MallocExtension::FreeListInfo i;
       i.max_object_size = (s << kPageShift);
       i.min_object_size = ((s - 1) << kPageShift);
 
       i.type = kPageHeapType;
-      i.total_bytes_free = (s << kPageShift) * small.normal_length[s];
+      i.total_bytes_free = (s << kPageShift) * small.normal_length[s - 1];
       v->push_back(i);
 
       i.type = kPageHeapUnmappedType;
-      i.total_bytes_free = (s << kPageShift) * small.returned_length[s];
+      i.total_bytes_free = (s << kPageShift) * small.returned_length[s - 1];
       v->push_back(i);
     }
   }
@@ -1270,9 +1272,11 @@ void* handle_oom(malloc_fn retry_fn,
 
 // Copy of FLAGS_tcmalloc_large_alloc_report_threshold with
 // automatic increases factored in.
+#ifdef ENABLE_LARGE_ALLOC_REPORT
 static int64_t large_alloc_threshold =
   (kPageSize > FLAGS_tcmalloc_large_alloc_report_threshold
    ? kPageSize : FLAGS_tcmalloc_large_alloc_report_threshold);
+#endif
 
 static void ReportLargeAlloc(Length num_pages, void* result) {
   StackTrace stack;
@@ -1293,6 +1297,7 @@ static void ReportLargeAlloc(Length num_pages, void* result) {
 
 // Must be called with the page lock held.
 inline bool should_report_large(Length num_pages) {
+#ifdef ENABLE_LARGE_ALLOC_REPORT
   const int64 threshold = large_alloc_threshold;
   if (threshold > 0 && num_pages >= (threshold >> kPageShift)) {
     // Increase the threshold by 1/8 every time we generate a report.
@@ -1301,6 +1306,7 @@ inline bool should_report_large(Length num_pages) {
                              ? threshold + threshold/8 : 8ll<<30);
     return true;
   }
+#endif
   return false;
 }
 
@@ -1385,7 +1391,7 @@ ATTRIBUTE_ALWAYS_INLINE inline void* do_calloc(size_t n, size_t elem_size) {
 
   void* result = do_malloc_or_cpp_alloc(size);
   if (result != NULL) {
-    memset(result, 0, size);
+    memset(result, 0, tc_nallocx(size, 0));
   }
   return result;
 }
@@ -1531,7 +1537,9 @@ ATTRIBUTE_ALWAYS_INLINE inline void* do_realloc_with_callback(
   //    . If we need to grow, grow to max(new_size, old_size * 1.X)
   //    . Don't shrink unless new_size < old_size * 0.Y
   // X and Y trade-off time for wasted space.  For now we do 1.25 and 0.5.
-  const size_t lower_bound_to_grow = old_size + old_size / 4ul;
+  const size_t min_growth = min(old_size / 4,
+      (std::numeric_limits<size_t>::max)() - old_size);  // Avoid overflow.
+  const size_t lower_bound_to_grow = old_size + min_growth;
   const size_t upper_bound_to_shrink = old_size / 2ul;
   if ((new_size > old_size) || (new_size < upper_bound_to_shrink)) {
     // Need to reallocate.
@@ -1685,6 +1693,10 @@ extern "C" PERFTOOLS_DLL_DECL int tc_set_new_mode(int flag) PERFTOOLS_NOTHROW {
   int old_mode = tc_new_mode;
   tc_new_mode = flag;
   return old_mode;
+}
+
+extern "C" PERFTOOLS_DLL_DECL int tc_query_new_mode() PERFTOOLS_NOTHROW {
+  return tc_new_mode;
 }
 
 #ifndef TCMALLOC_USING_DEBUGALLOCATION  // debugallocation.cc defines its own
@@ -1986,9 +1998,6 @@ TC_ALIAS(tc_free);
 // (via ::operator delete(ptr, nothrow)).
 // But it's really the same as normal delete, so we just do the same thing.
 extern "C" PERFTOOLS_DLL_DECL void tc_delete_nothrow(void* p, const std::nothrow_t&) PERFTOOLS_NOTHROW
-#ifdef TC_ALIAS
-TC_ALIAS(tc_free);
-#else
 {
   if (PREDICT_FALSE(!base::internal::delete_hooks_.empty())) {
     tcmalloc::invoke_hooks_and_free(p);
@@ -1996,7 +2005,6 @@ TC_ALIAS(tc_free);
   }
   do_free(p);
 }
-#endif
 
 extern "C" PERFTOOLS_DLL_DECL void* tc_newarray(size_t size)
 #ifdef TC_ALIAS
@@ -2068,33 +2076,21 @@ extern "C" PERFTOOLS_DLL_DECL void* tc_new_aligned_nothrow(size_t size, std::ali
 }
 
 extern "C" PERFTOOLS_DLL_DECL void tc_delete_aligned(void* p, std::align_val_t) PERFTOOLS_NOTHROW
-#ifdef TC_ALIAS
-TC_ALIAS(tc_delete);
-#else
 {
   free_fast_path(p);
 }
-#endif
 
 // There is no easy way to obtain the actual size used by do_memalign to allocate aligned storage, so for now
 // just ignore the size. It might get useful in the future.
 extern "C" PERFTOOLS_DLL_DECL void tc_delete_sized_aligned(void* p, size_t size, std::align_val_t align) PERFTOOLS_NOTHROW
-#ifdef TC_ALIAS
-TC_ALIAS(tc_delete);
-#else
 {
   free_fast_path(p);
 }
-#endif
 
 extern "C" PERFTOOLS_DLL_DECL void tc_delete_aligned_nothrow(void* p, std::align_val_t, const std::nothrow_t&) PERFTOOLS_NOTHROW
-#ifdef TC_ALIAS
-TC_ALIAS(tc_delete);
-#else
 {
   free_fast_path(p);
 }
-#endif
 
 extern "C" PERFTOOLS_DLL_DECL void* tc_newarray_aligned(size_t size, std::align_val_t align)
 #ifdef TC_ALIAS

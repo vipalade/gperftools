@@ -61,7 +61,7 @@
 static inline void* do_mmap64(void *start, size_t length,
                               int prot, int flags,
                               int fd, __off64_t offset) __THROW {
-  return sys_mmap(start, length, prot, flags, fd, offset);
+  return (void*)syscall(SYS_mmap, start, length, prot, flags, fd, offset);
 }
 
 #define MALLOC_HOOK_HAVE_DO_MMAP64 1
@@ -152,7 +152,7 @@ extern "C" {
   void* mremap(void* old_addr, size_t old_size, size_t new_size,
                int flags, ...) __THROW
     ATTRIBUTE_SECTION(malloc_hook);
-  void* sbrk(ptrdiff_t increment) __THROW
+  void* sbrk(intptr_t increment) __THROW
     ATTRIBUTE_SECTION(malloc_hook);
 }
 
@@ -189,7 +189,7 @@ extern "C" int munmap(void* start, size_t length) __THROW {
   MallocHook::InvokeMunmapHook(start, length);
   int result;
   if (!MallocHook::InvokeMunmapReplacement(start, length, &result)) {
-    result = sys_munmap(start, length);
+    result = syscall(SYS_munmap, start, length);
   }
   return result;
 }
@@ -200,7 +200,8 @@ extern "C" void* mremap(void* old_addr, size_t old_size, size_t new_size,
   va_start(ap, flags);
   void *new_address = va_arg(ap, void *);
   va_end(ap);
-  void* result = sys_mremap(old_addr, old_size, new_size, flags, new_address);
+  void* result = (void*)syscall(SYS_mremap, old_addr, old_size, new_size, flags,
+                                new_address);
   MallocHook::InvokeMremapHook(result, old_addr, old_size, new_size, flags,
                                new_address);
   return result;
@@ -208,9 +209,9 @@ extern "C" void* mremap(void* old_addr, size_t old_size, size_t new_size,
 
 #ifndef __UCLIBC__
 // libc's version:
-extern "C" void* __sbrk(ptrdiff_t increment);
+extern "C" void* __sbrk(intptr_t increment);
 
-extern "C" void* sbrk(ptrdiff_t increment) __THROW {
+extern "C" void* sbrk(intptr_t increment) __THROW {
   MallocHook::InvokePreSbrkHook(increment);
   void *result = __sbrk(increment);
   MallocHook::InvokeSbrkHook(result, increment);
